@@ -20,14 +20,14 @@ func manager(c context.Context) {
 		var allQueues []string
 		var err error
 		for next != 0 {
-			allQueues, next, err = Rdb.Scan(c, cursor, "inactive:*", 1000).Result()
+			allQueues, next, err = Rdb.Scan(c, cursor, "info:*", 1000).Result()
 
 			// allQueues, err := Rdb.Keys(c, "inactive:*").Result()
 			if err != nil {
 				log("ERROR", err)
 			}
 			for _, name := range allQueues {
-				queue := name[9:]
+				queue := name[5:]
 				_, exist := workers[queue]
 				if exist {
 					continue

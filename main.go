@@ -53,19 +53,46 @@ func log(a ...interface{}) {
 	fmt.Println(a...)
 }
 
-func getQueueListName(c *fiber.Ctx) (string, error) {
+func getQueueName(c *fiber.Ctx) (string, error) {
 	name := c.Params("queueName")
 	// TODO: valid queue name
 	return name, nil
 }
 
-func getQueueDefaultDelaySeconds(name string) int {
-	// TODO: get queue setting from redis
+func getQueueMaxTTL(c context.Context, name string) time.Duration {
+	ttl, err := Rdb.HGet(c, "info:"+name, "max_ttl").Result()
+	if err != nil && ttl != "" {
+		ttlInt, err := strconv.Atoi(ttl)
+		if err == nil && ttlInt != 0 {
+			return time.Second * time.Duration(ttlInt)
+		}
+	}
+	return time.Hour * 24 * 15
+}
+func getQueueMaxProcessTime(c context.Context, name string) time.Duration {
+	seconds, err := Rdb.HGet(c, "info:"+name, "max_process_seconds").Result()
+	if err != nil && seconds != "" {
+		secondsInt, err := strconv.Atoi(seconds)
+		if err == nil && secondsInt != 0 {
+			return time.Second * time.Duration(secondsInt)
+		}
+	}
+	return time.Minute
+}
+
+func getQueueDefaultDelaySeconds(c context.Context, name string) int {
+	seconds, err := Rdb.HGet(c, "info:"+name, "max_process_seconds").Result()
+	if err != nil && seconds != "" {
+		secondsInt, err := strconv.Atoi(seconds)
+		if err == nil && secondsInt != 0 {
+			return secondsInt
+		}
+	}
 	return 0
 }
 
 func sendMessage(c *fiber.Ctx) error {
-	name, err := getQueueListName(c)
+	name, err := getQueueName(c)
 	if err != nil {
 		return err
 	}
@@ -75,17 +102,18 @@ func sendMessage(c *fiber.Ctx) error {
 	delaySecondsStr := c.Query("delay-seconds")
 	delaySeconds := 0
 	if delaySecondsStr == "" {
-		delaySeconds = getQueueDefaultDelaySeconds(name)
+		delaySeconds = getQueueDefaultDelaySeconds(c.Context(), name)
 	} else {
 		delaySeconds, _ = strconv.Atoi(delaySecondsStr)
 	}
 	msg := c.Body()
 	msgID := uuid.New().String()
-	_, err = Rdb2.Set(c.Context(), msgID, msg, time.Hour*24*15).Result()
+	_, err = Rdb2.Set(c.Context(), msgID, msg, getQueueMaxTTL(c.Context(), name)).Result()
 	log("CREATE MSG", msgID)
 	if err != nil {
 		return err
 	}
+	Rdb.HIncrBy(c.Context(), "info:"+name, "created_messages_count", 1).Result()
 	if delaySeconds == 0 {
 		Rdb.LPush(c.Context(), "active:"+name, msgID)
 		log("ACTIVE MSG", msgID)
@@ -107,7 +135,7 @@ func sendMessage(c *fiber.Ctx) error {
 }
 
 func getMessage(c *fiber.Ctx) error {
-	name, err := getQueueListName(c)
+	name, err := getQueueName(c)
 	if err != nil {
 		return err
 	}
@@ -121,9 +149,19 @@ func getMessage(c *fiber.Ctx) error {
 		log("GET    MSG", msgID)
 		msg, err := Rdb2.Get(c.Context(), msgID).Result()
 		// if msg has been deleted, return null
-		if err == nil {
+		if err == nil && msg != "" {
+			activeAt := time.Now().Add(getQueueMaxProcessTime(c.Context(), name))
+			z := redis.Z{
+				Score:  float64(activeAt.Unix()),
+				Member: msgID,
+			}
+			_, err := Rdb.ZAdd(c.Context(), "inactive:"+name, &z).Result()
+			if err != nil {
+				log("ERROR", err)
+			}
 			c.Response().Header.Add("MQS-MsgID", msgID)
 			c.WriteString(msg)
+			Rdb.HIncrBy(c.Context(), "info:"+name, "get_messages_count", 1).Result()
 		} else {
 			log("INVALID MSG", msgID)
 		}
@@ -137,15 +175,16 @@ func modifyMessage(c *fiber.Ctx) error {
 }
 
 func deleteMessage(c *fiber.Ctx) error {
-	// name := c.Params("queueName")
-	// if name == "" {
-	// 	return fiber.NewError(400, "queue name required")
-	// }
+	name := c.Params("queueName")
+	if name == "" {
+		return fiber.NewError(400, "queue name required")
+	}
 	msgID := c.Params("msgID")
 	if msgID == "" {
 		return fiber.NewError(400, "message ID required")
 	}
 	log("DELETE MSG", msgID)
+	Rdb.HIncrBy(c.Context(), "info:"+name, "consumed_messages_count", 1).Result()
 	count, err := Rdb2.Del(c.Context(), msgID).Result()
 	if err != nil {
 		return err

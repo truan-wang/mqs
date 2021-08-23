@@ -25,6 +25,7 @@ Message Queue info struct:
   created_messages_count: readonly
   active_messages_count: readonly
   inactive_messages_count: readonly
+  get_messages_count: readonly
   consumed_messages_count: readonly
   latest_worker_check_time: readonly
 
