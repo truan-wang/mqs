@@ -3,15 +3,15 @@ Message struct:
   priority: 1 - 16, higher priority get consume earily, default value 1;
   delay_seconds: delay to be consume, default value null, use queue default setting.
 
-Message Resource: http://$host/api/message/$queueName/
+Message Resource: http://$host/api/mqs/$queueName/
 
-# send message
+# send a message
 POST ${Message Resource}
 
-# get message for consume
+# get a message for consume
 GET ${Message Resource}
 
-# consume message
+# consume a message
 DELETE ${Message Resource}/${messageID}
 
 # modify message properties
@@ -29,7 +29,7 @@ Message Queue info struct:
   consumed_messages_count: readonly
   latest_worker_check_time: readonly
 
-Message Queue info Resource: http://$host/api/message/$queueName/info
+Message Queue info Resource: http://$host/api/mqs/$queueName/info
 
 # get Message Queue Info
 GET  ${Message Queue info Resource}

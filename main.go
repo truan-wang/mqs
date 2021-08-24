@@ -14,8 +14,10 @@ import (
 
 var Rdb *redis.Client
 var Rdb2 *redis.Client
+var Token string
 
 func init() {
+	Token = os.Getenv("AUTH_TOKEN")
 	addr := os.Getenv("REDIS_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:6379"
@@ -31,9 +33,11 @@ func init() {
 	dbInt, _ := strconv.Atoi(db)
 
 	Rdb = redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: pwd,
-		DB:       dbInt,
+		Addr:         addr,
+		Password:     pwd,
+		DB:           dbInt,
+		PoolSize:     4096,
+		MinIdleConns: 10,
 	})
 	db2 := os.Getenv("REDIS_DB2")
 	if db2 == "" {
@@ -51,6 +55,14 @@ func init() {
 func log(a ...interface{}) {
 	fmt.Print(time.Now().Format("2006.01.02-15:04:05 "))
 	fmt.Println(a...)
+}
+
+func login(c *fiber.Ctx) error {
+	token := c.Get("Auth-Token")
+	if token != Token {
+		return c.SendStatus(403)
+	}
+	return c.Next()
 }
 
 func getQueueName(c *fiber.Ctx) (string, error) {
@@ -212,11 +224,13 @@ func summary(c *fiber.Ctx) error {
 
 func main() {
 	c := context.Background()
-	c, cancel := context.WithCancel(c)
+	c, cancelWorkers := context.WithCancel(c)
 
 	go manager(c)
 
 	app := fiber.New()
+
+	app.Use(login)
 
 	app.Get("/api/mqs/:queueName/info", getMessageInfo)
 	app.Put("/api/mqs/:queueName/info", modifyMessageInfo)
@@ -227,5 +241,5 @@ func main() {
 	app.Get("/api/mqs/summary", summary)
 
 	app.Listen(":3000")
-	cancel()
+	cancelWorkers()
 }

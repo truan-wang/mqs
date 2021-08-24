@@ -28,10 +28,11 @@ func manager(c context.Context) {
 			}
 			for _, name := range allQueues {
 				queue := name[5:]
-				_, exist := workers[queue]
-				if exist {
-					continue
-				}
+				// TODO: use channel to check worker status
+				// _, exist := workers[queue]
+				// if exist {
+				// 	continue
+				// }
 
 				latest, _ := Rdb.HGet(c, "info:"+queue, "latest_worker_check_time").Result()
 				if latest == "" {
