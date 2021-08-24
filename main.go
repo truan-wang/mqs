@@ -81,7 +81,7 @@ func getQueueName(c *fiber.Ctx) (string, error) {
 
 func getQueueMaxTTL(c context.Context, name string) time.Duration {
 	ttl, err := Rdb.HGet(c, "info:"+name, "max_ttl").Result()
-	if err != nil && ttl != "" {
+	if err == nil && ttl != "" {
 		ttlInt, err := strconv.Atoi(ttl)
 		if err == nil && ttlInt != 0 {
 			return time.Second * time.Duration(ttlInt)
@@ -91,7 +91,7 @@ func getQueueMaxTTL(c context.Context, name string) time.Duration {
 }
 func getQueueMaxProcessTime(c context.Context, name string) time.Duration {
 	seconds, err := Rdb.HGet(c, "info:"+name, "max_process_seconds").Result()
-	if err != nil && seconds != "" {
+	if err == nil && seconds != "" {
 		secondsInt, err := strconv.Atoi(seconds)
 		if err == nil && secondsInt != 0 {
 			return time.Second * time.Duration(secondsInt)
@@ -102,7 +102,7 @@ func getQueueMaxProcessTime(c context.Context, name string) time.Duration {
 
 func getQueueDefaultDelaySeconds(c context.Context, name string) int {
 	seconds, err := Rdb.HGet(c, "info:"+name, "delay_seconds").Result()
-	if err != nil && seconds != "" {
+	if err == nil && seconds != "" {
 		secondsInt, err := strconv.Atoi(seconds)
 		if err == nil && secondsInt != 0 {
 			return secondsInt
