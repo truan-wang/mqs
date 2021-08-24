@@ -215,6 +215,7 @@ func modifyMessage(c *fiber.Ctx) error {
 		Member: msgID,
 	}
 	Rdb.ZAdd(c.Context(), "inactive:"+name, &z).Result()
+	log("DELAY  MSG", msgID, "IN", delaySeconds, "SECONDS")
 
 	return nil
 }
