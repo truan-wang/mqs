@@ -266,16 +266,16 @@ func getQueueInfo(name string, c *fiber.Ctx) map[string]string {
 	info["inactive_messages_count"] = strconv.Itoa(int(inactiveLen))
 	_, ok := info["max_ttl"]
 	if !ok {
-		info["max_ttl"] = fmt.Sprintf("%f", DEFAULT_MAX_TTL.Seconds())
+		info["max_ttl"] = fmt.Sprintf("%.0f", DEFAULT_MAX_TTL.Seconds())
 	}
 	_, ok = info["max_process_seconds"]
 	if !ok {
-		info["max_process_seconds"] = fmt.Sprintf("%f", DEFAULT_MAX_PROCESS_SECONDS.Seconds())
+		info["max_process_seconds"] = fmt.Sprintf("%.0f", DEFAULT_MAX_PROCESS_SECONDS.Seconds())
 	}
 
 	_, ok = info["delay_seconds"]
 	if !ok {
-		info["delay_seconds"] = fmt.Sprintf("%f", DEFAULT_DELAY_SECONDS.Seconds())
+		info["delay_seconds"] = fmt.Sprintf("%.0f", DEFAULT_DELAY_SECONDS.Seconds())
 	}
 	ts := info["latest_worker_check_time"]
 	if ts != "" {
