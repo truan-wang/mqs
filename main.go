@@ -266,16 +266,16 @@ func getQueueInfo(name string, c *fiber.Ctx) map[string]string {
 	info["inactive_messages_count"] = strconv.Itoa(int(inactiveLen))
 	_, ok := info["max_ttl"]
 	if !ok {
-		info["max_ttl"] = DEFAULT_MAX_TTL.String()
+		info["max_ttl"] = fmt.Sprintf("%f", DEFAULT_MAX_TTL.Seconds())
 	}
 	_, ok = info["max_process_seconds"]
 	if !ok {
-		info["max_process_seconds"] = DEFAULT_MAX_PROCESS_SECONDS.String()
+		info["max_process_seconds"] = fmt.Sprintf("%f", DEFAULT_MAX_PROCESS_SECONDS.Seconds())
 	}
 
 	_, ok = info["delay_seconds"]
 	if !ok {
-		info["delay_seconds"] = DEFAULT_DELAY_SECONDS.String()
+		info["delay_seconds"] = fmt.Sprintf("%f", DEFAULT_DELAY_SECONDS.Seconds())
 	}
 	ts := info["latest_worker_check_time"]
 	if ts != "" {
@@ -312,21 +312,21 @@ func modifyMessageInfo(c *fiber.Ctx) error {
 	delaySeconds := c.Query("delay-seconds")
 	if delaySeconds != "" {
 		_, err := strconv.ParseInt(delaySeconds, 10, 64)
-		if err != nil {
+		if err == nil {
 			Rdb.HSet(c.Context(), infoKey, "delay_seconds", delaySeconds).Result()
 		}
 	}
 	maxProcessSeconds := c.Query("max-process-seconds")
 	if maxProcessSeconds != "" {
 		_, err := strconv.ParseInt(maxProcessSeconds, 10, 64)
-		if err != nil {
+		if err == nil {
 			Rdb.HSet(c.Context(), infoKey, "max_process_seconds", maxProcessSeconds).Result()
 		}
 	}
 	maxTTL := c.Query("max-ttl")
 	if maxTTL != "" {
 		_, err := strconv.ParseInt(maxTTL, 10, 64)
-		if err != nil {
+		if err == nil {
 			Rdb.HSet(c.Context(), infoKey, "max_ttl", maxTTL).Result()
 		}
 	}
