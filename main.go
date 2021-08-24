@@ -16,6 +16,10 @@ var Rdb *redis.Client
 var Rdb2 *redis.Client
 var Token string
 
+const DEFAULT_MAX_TTL time.Duration = time.Hour * 24 * 15
+const DEFAULT_MAX_PROCESS_SECONDS time.Duration = time.Minute
+const DEFAULT_DELAY_SECONDS time.Duration = 0
+
 func init() {
 	Token = os.Getenv("AUTH_TOKEN")
 	addr := os.Getenv("REDIS_ADDR")
@@ -79,7 +83,7 @@ func getQueueMaxTTL(c context.Context, name string) time.Duration {
 			return time.Second * time.Duration(ttlInt)
 		}
 	}
-	return time.Hour * 24 * 15
+	return DEFAULT_MAX_TTL
 }
 func getQueueMaxProcessTime(c context.Context, name string) time.Duration {
 	seconds, err := Rdb.HGet(c, "info:"+name, "max_process_seconds").Result()
@@ -89,7 +93,7 @@ func getQueueMaxProcessTime(c context.Context, name string) time.Duration {
 			return time.Second * time.Duration(secondsInt)
 		}
 	}
-	return time.Minute
+	return DEFAULT_MAX_PROCESS_SECONDS
 }
 
 func getQueueDefaultDelaySeconds(c context.Context, name string) int {
@@ -100,7 +104,7 @@ func getQueueDefaultDelaySeconds(c context.Context, name string) int {
 			return secondsInt
 		}
 	}
-	return 0
+	return int(DEFAULT_DELAY_SECONDS)
 }
 
 func sendMessage(c *fiber.Ctx) error {
@@ -171,7 +175,7 @@ func getMessage(c *fiber.Ctx) error {
 			if err != nil {
 				log("ERROR", err)
 			}
-			c.Response().Header.Add("MQS-MsgID", msgID)
+			c.Response().Header.Add("mqs-msgid", msgID)
 			c.WriteString(msg)
 			Rdb.HIncrBy(c.Context(), "info:"+name, "get_messages_count", 1).Result()
 		} else {
@@ -183,6 +187,35 @@ func getMessage(c *fiber.Ctx) error {
 }
 
 func modifyMessage(c *fiber.Ctx) error {
+	name, err := getQueueName(c)
+	if err != nil {
+		return err
+	}
+	if name == "" {
+		return fiber.NewError(400, "queue name invalid")
+	}
+	msgID := c.Params("msgID")
+	if msgID == "" {
+		return fiber.NewError(400, "message ID required")
+	}
+	delaySecondsStr := c.Query("delay-seconds")
+	delaySeconds := 0
+	if delaySecondsStr == "" {
+		return fiber.NewError(400, "delay-seconds required")
+	} else {
+		delaySeconds, _ = strconv.Atoi(delaySecondsStr)
+	}
+	if delaySeconds < 0 {
+		return fiber.NewError(400, "delay-seconds should not less than 0")
+	}
+
+	activeAt := time.Now().Add(time.Second * time.Duration(delaySeconds))
+	z := redis.Z{
+		Score:  float64(activeAt.Unix()),
+		Member: msgID,
+	}
+	Rdb.ZAdd(c.Context(), "inactive:"+name, &z).Result()
+
 	return nil
 }
 
@@ -196,6 +229,7 @@ func deleteMessage(c *fiber.Ctx) error {
 		return fiber.NewError(400, "message ID required")
 	}
 	log("DELETE MSG", msgID)
+	Rdb.ZRem(c.Context(), "inactive:"+name, msgID).Result()
 	Rdb.HIncrBy(c.Context(), "info:"+name, "consumed_messages_count", 1).Result()
 	count, err := Rdb2.Del(c.Context(), msgID).Result()
 	if err != nil {
@@ -211,6 +245,48 @@ func deleteMessage(c *fiber.Ctx) error {
 }
 
 func getMessageInfo(c *fiber.Ctx) error {
+	name, err := getQueueName(c)
+	if err != nil {
+		return err
+	}
+	if name == "" {
+		return fiber.NewError(400, "queue name invalid")
+	}
+	info, err := Rdb.HGetAll(c.Context(), "info:"+name).Result()
+	if err != nil {
+		log("ERROR", err)
+	}
+	activeLen, err := Rdb.LLen(c.Context(), "active:"+name).Result()
+	if err != nil {
+		log("ERROR", err)
+	}
+	info["active_messages_count"] = strconv.Itoa(int(activeLen))
+	inactiveLen, err := Rdb.ZCount(c.Context(), "inactive:"+name, "-inf", "+inf").Result()
+	if err != nil {
+		log("ERROR", err)
+	}
+	info["inactive_messages_count"] = strconv.Itoa(int(inactiveLen))
+	_, ok := info["max_ttl"]
+	if !ok {
+		info["max_ttl"] = DEFAULT_MAX_TTL.String()
+	}
+	_, ok = info["max_process_seconds"]
+	if !ok {
+		info["max_process_seconds"] = DEFAULT_MAX_PROCESS_SECONDS.String()
+	}
+
+	_, ok = info["delay_seconds"]
+	if !ok {
+		info["delay_seconds"] = DEFAULT_DELAY_SECONDS.String()
+	}
+	ts := info["latest_worker_check_time"]
+	if ts != "" {
+		tsInt64, _ := strconv.ParseInt(ts, 10, 64)
+		t := time.Unix(tsInt64, 0)
+		info["latest_worker_check_time"] = t.Local().Format("2006.01.02-15:04:05")
+	}
+
+	c.Status(200).JSON(info)
 	return nil
 }
 
@@ -235,8 +311,8 @@ func main() {
 	app.Get("/api/mqs/:queueName/info", getMessageInfo)
 	app.Put("/api/mqs/:queueName/info", modifyMessageInfo)
 	app.Get("/api/mqs/:queueName", getMessage)
-	app.Put("/api/mqs/:queueName", modifyMessage)
 	app.Post("/api/mqs/:queueName", sendMessage)
+	app.Put("/api/mqs/:queueName/:msgID", modifyMessage)
 	app.Delete("/api/mqs/:queueName/:msgID", deleteMessage)
 	app.Get("/api/mqs/summary", summary)
 
