@@ -62,7 +62,10 @@ func log(a ...interface{}) {
 }
 
 func login(c *fiber.Ctx) error {
-	token := c.Get("Auth-Token")
+	token := c.Query("auth-token")
+	if token == "" {
+		token = c.Get("auth-token")
+	}
 	if token != Token {
 		return c.SendStatus(403)
 	}
@@ -97,7 +100,7 @@ func getQueueMaxProcessTime(c context.Context, name string) time.Duration {
 }
 
 func getQueueDefaultDelaySeconds(c context.Context, name string) int {
-	seconds, err := Rdb.HGet(c, "info:"+name, "max_process_seconds").Result()
+	seconds, err := Rdb.HGet(c, "info:"+name, "delay_seconds").Result()
 	if err != nil && seconds != "" {
 		secondsInt, err := strconv.Atoi(seconds)
 		if err == nil && secondsInt != 0 {
@@ -245,14 +248,7 @@ func deleteMessage(c *fiber.Ctx) error {
 	return nil
 }
 
-func getMessageInfo(c *fiber.Ctx) error {
-	name, err := getQueueName(c)
-	if err != nil {
-		return err
-	}
-	if name == "" {
-		return fiber.NewError(400, "queue name invalid")
-	}
+func getQueueInfo(name string, c *fiber.Ctx) map[string]string {
 	info, err := Rdb.HGetAll(c.Context(), "info:"+name).Result()
 	if err != nil {
 		log("ERROR", err)
@@ -286,16 +282,82 @@ func getMessageInfo(c *fiber.Ctx) error {
 		t := time.Unix(tsInt64, 0)
 		info["latest_worker_check_time"] = t.Local().Format("2006.01.02-15:04:05")
 	}
+	return info
+}
 
+func getMessageInfo(c *fiber.Ctx) error {
+	name, err := getQueueName(c)
+	if err != nil {
+		return err
+	}
+	if name == "" {
+		return fiber.NewError(400, "queue name invalid")
+	}
+
+	info := getQueueInfo(name, c)
 	c.Status(200).JSON(info)
 	return nil
 }
 
 func modifyMessageInfo(c *fiber.Ctx) error {
+	name, err := getQueueName(c)
+	if err != nil {
+		return err
+	}
+	if name == "" {
+		return fiber.NewError(400, "queue name invalid")
+	}
+	infoKey := "info:" + name
+	delaySeconds := c.Query("delay-seconds")
+	if delaySeconds != "" {
+		_, err := strconv.ParseInt(delaySeconds, 10, 64)
+		if err != nil {
+			Rdb.HSet(c.Context(), infoKey, "delay_seconds", delaySeconds).Result()
+		}
+	}
+	maxProcessSeconds := c.Query("max-process-seconds")
+	if maxProcessSeconds != "" {
+		_, err := strconv.ParseInt(maxProcessSeconds, 10, 64)
+		if err != nil {
+			Rdb.HSet(c.Context(), infoKey, "max_process_seconds", maxProcessSeconds).Result()
+		}
+	}
+	maxTTL := c.Query("max-ttl")
+	if maxTTL != "" {
+		_, err := strconv.ParseInt(maxTTL, 10, 64)
+		if err != nil {
+			Rdb.HSet(c.Context(), infoKey, "max_ttl", maxTTL).Result()
+		}
+	}
+
+	info := getQueueInfo(name, c)
+
+	c.Status(200).JSON(info)
+
 	return nil
 }
 
 func summary(c *fiber.Ctx) error {
+	result := make([]map[string]string, 0, 100)
+	var cursor uint64 = 0
+	var next uint64 = 10000
+	var allQueues []string
+	var err error
+	for next != 0 {
+		allQueues, next, err = Rdb.Scan(c.Context(), cursor, "info:*", 1000).Result()
+
+		if err != nil {
+			log("ERROR", err)
+		}
+		for _, name := range allQueues {
+			queue := name[5:]
+			info := getQueueInfo(queue, c)
+			info["name"] = queue
+			result = append(result, info)
+		}
+	}
+
+	c.Status(200).JSON(result)
 	return nil
 }
 
@@ -311,11 +373,11 @@ func main() {
 
 	app.Get("/api/mqs/:queueName/info", getMessageInfo)
 	app.Put("/api/mqs/:queueName/info", modifyMessageInfo)
-	app.Get("/api/mqs/:queueName", getMessage)
-	app.Post("/api/mqs/:queueName", sendMessage)
 	app.Put("/api/mqs/:queueName/:msgID", modifyMessage)
 	app.Delete("/api/mqs/:queueName/:msgID", deleteMessage)
-	app.Get("/api/mqs/summary", summary)
+	app.Get("/api/mqs/:queueName", getMessage)
+	app.Post("/api/mqs/:queueName", sendMessage)
+	app.Get("/api/mqs/", summary)
 
 	app.Listen(":3000")
 	cancelWorkers()
