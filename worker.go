@@ -9,8 +9,9 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-func manager(c context.Context) {
+func managerMain(ctx context.Context) {
 	log("START WORKER MANAGER")
+
 	workers := make(map[string]time.Time)
 
 	t := time.Tick(time.Second * 10)
@@ -20,9 +21,9 @@ func manager(c context.Context) {
 		var allQueues []string
 		var err error
 		for next != 0 {
-			allQueues, next, err = Rdb.Scan(c, cursor, "info:*", 1000).Result()
+			allQueues, next, err = Rdb.Scan(ctx, cursor, "info:*", 1000).Result()
 
-			// allQueues, err := Rdb.Keys(c, "inactive:*").Result()
+			// allQueues, err := Rdb.Keys(ctx, "inactive:*").Result()
 			if err != nil {
 				log("ERROR", err)
 			}
@@ -34,9 +35,9 @@ func manager(c context.Context) {
 				// 	continue
 				// }
 
-				latest, _ := Rdb.HGet(c, "info:"+queue, "latest_worker_check_time").Result()
+				latest, _ := Rdb.HGet(ctx, "info:"+queue, "latest_worker_check_time").Result()
 				if latest == "" {
-					go work(c, queue)
+					go work(ctx, queue)
 					workers[queue] = time.Now()
 				} else {
 					// check worker timeout
@@ -45,7 +46,7 @@ func manager(c context.Context) {
 					now := time.Now()
 					if now.Sub(t) > time.Minute {
 						log("WORKER TIMEOUT", queue)
-						go work(c, queue)
+						go work(ctx, queue)
 						workers[queue] = time.Now()
 					}
 				}
@@ -55,7 +56,7 @@ func manager(c context.Context) {
 	iterQueue()
 	for {
 		select {
-		case <-c.Done():
+		case <-ctx.Done():
 			log("STOP WORKER MANAGER")
 			return
 		case <-t:
@@ -64,7 +65,7 @@ func manager(c context.Context) {
 	}
 }
 
-func work(c context.Context, queueName string) {
+func work(ctx context.Context, queueName string) {
 	log("START WORKER", queueName)
 
 	activeKey := "active:" + queueName
@@ -73,37 +74,37 @@ func work(c context.Context, queueName string) {
 
 	for {
 		select {
-		case <-c.Done():
+		case <-ctx.Done():
 			log("STOP WORKER", queueName)
 			return
 		default:
 		}
 		now := fmt.Sprint(time.Now().Unix())
-		Rdb.HSet(c, infoKey, "latest_worker_check_time", now)
-		msgs, err := Rdb.ZRangeByScore(c, inactiveKey, &redis.ZRangeBy{Min: "-inf", Max: now}).Result()
+		Rdb.HSet(ctx, infoKey, "latest_worker_check_time", now)
+		msgs, err := Rdb.ZRangeByScore(ctx, inactiveKey, &redis.ZRangeBy{Min: "-inf", Max: now}).Result()
 		if err != nil {
 			log("ERROR", err)
 		}
 		if len(msgs) != 0 {
 			for _, id := range msgs {
-				exist, err := Rdb2.Exists(c, id).Result()
+				exist, err := Rdb2.Exists(ctx, id).Result()
 				if err != nil {
 					log("ERROR", err)
 				}
 				if exist != 0 {
 					log("ACTIVE MSG", id)
-					_, err = Rdb.RPush(c, activeKey, id).Result()
+					_, err = Rdb.RPush(ctx, activeKey, id).Result()
 					if err != nil {
 						log("ERROR", err)
 					} else {
-						_, err = Rdb.ZRem(c, inactiveKey, id).Result()
+						_, err = Rdb.ZRem(ctx, inactiveKey, id).Result()
 						if err != nil {
 							log("ERROR", err)
 						}
 					}
 				} else {
 					log("INVALID MSG", id)
-					_, err = Rdb.ZRem(c, inactiveKey, id).Result()
+					_, err = Rdb.ZRem(ctx, inactiveKey, id).Result()
 					if err != nil {
 						log("ERROR", err)
 					}

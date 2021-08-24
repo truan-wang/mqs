@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strconv"
 	"time"
 
@@ -361,13 +362,40 @@ func summary(c *fiber.Ctx) error {
 	return nil
 }
 
-func main() {
-	c := context.Background()
-	c, cancelWorkers := context.WithCancel(c)
+func workers_main() {
+	ctx := context.Background()
+	ctx, cancelWorkers := context.WithCancel(ctx)
+	defer cancelWorkers()
 
-	go manager(c)
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt)
+	go func() {
+		<-ch
+		fmt.Println("Gracefully shutting down workers...")
+		cancelWorkers()
+	}()
+
+	managerMain(ctx)
+}
+
+func main() {
+	if os.Getenv("QMS_WORKER_ONLY") != "" {
+		workers_main()
+		return
+	}
+	if os.Getenv("QMS_API_ONLY") == "" {
+		go workers_main()
+	}
 
 	app := fiber.New()
+
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt)
+	go func() {
+		<-ch
+		fmt.Println("Gracefully shutting down fiber...")
+		_ = app.Shutdown()
+	}()
 
 	app.Use(login)
 
@@ -380,5 +408,4 @@ func main() {
 	app.Get("/api/mqs/", summary)
 
 	app.Listen(":3000")
-	cancelWorkers()
 }
