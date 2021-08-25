@@ -178,7 +178,7 @@ func sendMessage(c *fiber.Ctx) error {
 	}
 	Rdb.HIncrBy(c.Context(), "info:"+name, "created_messages_count", 1).Result()
 	if delaySeconds == 0 {
-		Rdb.LPush(c.Context(), "active:"+name, msgID)
+		Rdb.RPush(c.Context(), "active:"+name, msgID)
 		log("ACTIVE MSG", msgID)
 	} else {
 		activeAt := time.Now().Add(time.Second * time.Duration(delaySeconds))
