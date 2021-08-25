@@ -15,14 +15,15 @@ import (
 
 var Rdb *redis.Client
 var Rdb2 *redis.Client
-var Token string
+var AUTH_TOKEN string = os.Getenv("AUTH_TOKEN")
+var infoCache *Cache = NewCache(time.Minute)
 
+const MAX_GET_MESSAGE_TIMEOUT time.Duration = 30 * time.Second
 const DEFAULT_MAX_TTL time.Duration = time.Hour * 24 * 15
 const DEFAULT_MAX_PROCESS_SECONDS time.Duration = time.Minute
 const DEFAULT_DELAY_SECONDS time.Duration = 0
 
 func init() {
-	Token = os.Getenv("AUTH_TOKEN")
 	addr := os.Getenv("REDIS_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:6379"
@@ -67,7 +68,7 @@ func login(c *fiber.Ctx) error {
 	if token == "" {
 		token = c.Get("auth-token")
 	}
-	if token != Token {
+	if token != AUTH_TOKEN {
 		return c.SendStatus(403)
 	}
 	return c.Next()
@@ -75,12 +76,12 @@ func login(c *fiber.Ctx) error {
 
 func getQueueName(c *fiber.Ctx) (string, error) {
 	name := c.Params("queueName")
-	// TODO: valid queue name
 	return name, nil
 }
 
-func getQueueMaxTTL(c context.Context, name string) time.Duration {
-	ttl, err := Rdb.HGet(c, "info:"+name, "max_ttl").Result()
+func createQueueMaxTTL(key interface{}) interface{} {
+	name := key.(string)
+	ttl, err := Rdb.HGet(context.Background(), "info:"+name, "max_ttl").Result()
 	if err == nil && ttl != "" {
 		ttlInt, err := strconv.Atoi(ttl)
 		if err == nil && ttlInt != 0 {
@@ -89,8 +90,23 @@ func getQueueMaxTTL(c context.Context, name string) time.Duration {
 	}
 	return DEFAULT_MAX_TTL
 }
-func getQueueMaxProcessTime(c context.Context, name string) time.Duration {
-	seconds, err := Rdb.HGet(c, "info:"+name, "max_process_seconds").Result()
+
+func getQueueMaxTTL(c context.Context, name string) time.Duration {
+	d, err := infoCache.Get(name+":max_ttl", createQueueMaxTTL, time.Minute*10)
+	if err != nil {
+		log("ERROR", err)
+		return DEFAULT_MAX_TTL
+	}
+	t, ok := d.(time.Duration)
+	if ok {
+		return t
+	}
+	return DEFAULT_MAX_TTL
+}
+
+func createQueueMaxProcessTime(key interface{}) interface{} {
+	name := key.(string)
+	seconds, err := Rdb.HGet(context.Background(), "info:"+name, "max_process_seconds").Result()
 	if err == nil && seconds != "" {
 		secondsInt, err := strconv.Atoi(seconds)
 		if err == nil && secondsInt != 0 {
@@ -100,13 +116,40 @@ func getQueueMaxProcessTime(c context.Context, name string) time.Duration {
 	return DEFAULT_MAX_PROCESS_SECONDS
 }
 
-func getQueueDefaultDelaySeconds(c context.Context, name string) int {
-	seconds, err := Rdb.HGet(c, "info:"+name, "delay_seconds").Result()
+func getQueueMaxProcessTime(c context.Context, name string) time.Duration {
+	d, err := infoCache.Get(name+":max_process_seconds", createQueueMaxProcessTime, time.Minute*10)
+	if err != nil {
+		log("ERROR", err)
+		return DEFAULT_MAX_PROCESS_SECONDS
+	}
+	t, ok := d.(time.Duration)
+	if ok {
+		return t
+	}
+	return DEFAULT_MAX_PROCESS_SECONDS
+}
+
+func createQueueDefaultDelaySeconds(key interface{}) interface{} {
+	name := key.(string)
+	seconds, err := Rdb.HGet(context.Background(), "info:"+name, "delay_seconds").Result()
 	if err == nil && seconds != "" {
 		secondsInt, err := strconv.Atoi(seconds)
 		if err == nil && secondsInt != 0 {
 			return secondsInt
 		}
+	}
+	return int(DEFAULT_DELAY_SECONDS)
+}
+
+func getQueueDefaultDelaySeconds(c context.Context, name string) int {
+	d, err := infoCache.Get(name+":delay_seconds", createQueueDefaultDelaySeconds, time.Minute*10)
+	if err != nil {
+		log("ERROR", err)
+		return int(DEFAULT_DELAY_SECONDS)
+	}
+	t, ok := d.(int)
+	if ok {
+		return t
 	}
 	return int(DEFAULT_DELAY_SECONDS)
 }
@@ -163,27 +206,32 @@ func getMessage(c *fiber.Ctx) error {
 		return fiber.NewError(400, "queue name invalid")
 	}
 	queueName := "active:" + name
-	msgs, _ := Rdb.BLPop(c.Context(), time.Second*10, queueName).Result()
-	if len(msgs) > 1 && msgs[0] == queueName {
-		msgID := msgs[1]
-		log("GET    MSG", msgID)
-		msg, err := Rdb2.Get(c.Context(), msgID).Result()
-		// if msg has been deleted, return null
-		if err == nil && msg != "" {
-			activeAt := time.Now().Add(getQueueMaxProcessTime(c.Context(), name))
-			z := redis.Z{
-				Score:  float64(activeAt.Unix()),
-				Member: msgID,
+	startAt := time.Now()
+	for timeout := time.Duration(0); timeout < MAX_GET_MESSAGE_TIMEOUT; {
+		msgs, _ := Rdb.BLPop(c.Context(), MAX_GET_MESSAGE_TIMEOUT-timeout, queueName).Result()
+		timeout = time.Since(startAt)
+		if len(msgs) > 1 && msgs[0] == queueName {
+			msgID := msgs[1]
+			log("GET    MSG", msgID)
+			msg, err := Rdb2.Get(c.Context(), msgID).Result()
+			// if msg has been deleted, return null
+			if err == nil && msg != "" {
+				activeAt := time.Now().Add(getQueueMaxProcessTime(c.Context(), name))
+				z := redis.Z{
+					Score:  float64(activeAt.Unix()),
+					Member: msgID,
+				}
+				_, err := Rdb.ZAdd(c.Context(), "inactive:"+name, &z).Result()
+				if err != nil {
+					log("ERROR", err)
+				}
+				c.Response().Header.Add("mqs-msgid", msgID)
+				c.WriteString(msg)
+				Rdb.HIncrBy(c.Context(), "info:"+name, "get_messages_count", 1).Result()
+				break
+			} else {
+				log("INVALID MSG", msgID)
 			}
-			_, err := Rdb.ZAdd(c.Context(), "inactive:"+name, &z).Result()
-			if err != nil {
-				log("ERROR", err)
-			}
-			c.Response().Header.Add("mqs-msgid", msgID)
-			c.WriteString(msg)
-			Rdb.HIncrBy(c.Context(), "info:"+name, "get_messages_count", 1).Result()
-		} else {
-			log("INVALID MSG", msgID)
 		}
 	}
 	c.Status(200)
