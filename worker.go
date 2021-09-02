@@ -10,7 +10,7 @@ import (
 )
 
 func managerMain(ctx context.Context) {
-	log("START WORKER MANAGER")
+	logWrapper("START WORKER MANAGER")
 
 	workers := make(map[string]time.Time)
 
@@ -25,7 +25,7 @@ func managerMain(ctx context.Context) {
 
 			// allQueues, err := Rdb.Keys(ctx, "inactive:*").Result()
 			if err != nil {
-				log("ERROR", err)
+				logWrapper("ERROR", err)
 			}
 			for _, name := range allQueues {
 				queue := name[5:]
@@ -45,7 +45,7 @@ func managerMain(ctx context.Context) {
 					t := time.Unix(ts, 0)
 					now := time.Now()
 					if now.Sub(t) > time.Minute {
-						log("WORKER TIMEOUT", queue)
+						logWrapper("WORKER TIMEOUT", queue)
 						go work(ctx, queue)
 						workers[queue] = time.Now()
 					}
@@ -57,7 +57,7 @@ func managerMain(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log("STOP WORKER MANAGER")
+			logWrapper("STOP WORKER MANAGER")
 			return
 		case <-t:
 			iterQueue()
@@ -66,7 +66,7 @@ func managerMain(ctx context.Context) {
 }
 
 func work(ctx context.Context, queueName string) {
-	log("START WORKER", queueName)
+	logWrapper("START WORKER", queueName)
 
 	activeKey := "active:" + queueName
 	inactiveKey := "inactive:" + queueName
@@ -75,7 +75,7 @@ func work(ctx context.Context, queueName string) {
 	for {
 		select {
 		case <-ctx.Done():
-			log("STOP WORKER", queueName)
+			logWrapper("STOP WORKER", queueName)
 			return
 		default:
 		}
@@ -83,35 +83,53 @@ func work(ctx context.Context, queueName string) {
 		Rdb.HSet(ctx, infoKey, "latest_worker_check_time", now)
 		msgs, err := Rdb.ZRangeByScore(ctx, inactiveKey, &redis.ZRangeBy{Min: "-inf", Max: now}).Result()
 		if err != nil {
-			log("ERROR", err)
+			logWrapper("ERROR", err)
 		}
 		if len(msgs) != 0 {
 			for _, id := range msgs {
 				exist, err := Rdb2.Exists(ctx, id).Result()
 				if err != nil {
-					log("ERROR", err)
+					logWrapper("ERROR", err)
 				}
 				if exist != 0 {
-					log("ACTIVE MSG", id)
+					logWrapper("ACTIVE MSG", id)
 					_, err = Rdb.RPush(ctx, activeKey, id).Result()
 					if err != nil {
-						log("ERROR", err)
+						logWrapper("ERROR", err)
 					} else {
 						_, err = Rdb.ZRem(ctx, inactiveKey, id).Result()
 						if err != nil {
-							log("ERROR", err)
+							logWrapper("ERROR", err)
 						}
 					}
 				} else {
-					log("INVALID MSG", id)
+					logWrapper("INVALID MSG", id)
 					_, err = Rdb.ZRem(ctx, inactiveKey, id).Result()
 					if err != nil {
-						log("ERROR", err)
+						logWrapper("ERROR", err)
 					}
 				}
 			}
-		} else {
-			time.Sleep(time.Second)
 		}
+		// clean deleted msg id in active queue, to solve problem that there has NOT any consumer pull from the active queue
+		for {
+			msgID, err := Rdb.LIndex(ctx, activeKey, 0).Result()
+			if err != nil {
+				break
+			}
+			exists, err := Rdb2.Exists(ctx, msgID).Result()
+			if err != nil {
+				logWrapper("ERROR", err)
+				break
+			} else {
+				if exists == 0 { // msg not exist
+					Rdb.LRem(ctx, activeKey, 1, msgID).Result()
+				} else { // since first msg exist, we may suppose other msgs also exist
+					break
+				}
+			}
+		}
+
+		time.Sleep(time.Second)
 	}
 }

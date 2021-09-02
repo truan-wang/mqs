@@ -30,7 +30,7 @@ func (c *Cache) cleanWorker() {
 		now := <-time.After(c.i)
 		c.t.Range(func(key, value interface{}) bool {
 			if t := value.(time.Time); t.Before(now) {
-				log("DELETE CACHE", key)
+				logWrapper("DELETE CACHE", key)
 				c.m.Delete(key)
 				c.t.Delete(key)
 			}
@@ -58,7 +58,7 @@ func (c *Cache) Get(key interface{}, create Create, ttl time.Duration) (interfac
 	v = create(key)
 	c.m.Store(key, v)
 	c.l.Unlock()
-	log("CREATE CACHE", key)
+	logWrapper("CREATE CACHE", key)
 
 	// if ttl >= 0, record expire time for delete
 	if ttl >= 0 {
