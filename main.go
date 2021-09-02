@@ -16,15 +16,20 @@ import (
 var Rdb *redis.Client
 var Rdb2 *redis.Client
 var AUTH_TOKEN string = os.Getenv("AUTH_TOKEN")
+var DEFAULT_ALERT_ACTIVE_MSG_IN_MINUTE int64 = 0 // no alert
 var infoCache *Cache = NewCache(time.Minute)
 
 const MAX_GET_MESSAGE_TIMEOUT time.Duration = 30 * time.Second
 const DEFAULT_MAX_TTL time.Duration = time.Hour * 24 * 15
 const DEFAULT_MAX_PROCESS_SECONDS time.Duration = time.Minute
 const DEFAULT_DELAY_SECONDS time.Duration = 0
-const DEFAULT_ALERT_ACTIVE_MSG_IN_MINUTE int = 0 // no alert
 
 func init() {
+	arlertCount := os.Getenv("DEFAULT_ALERT_ACTIVE_MSG_IN_MINUTE")
+	if arlertCount != "" {
+		DEFAULT_ALERT_ACTIVE_MSG_IN_MINUTE, _ = strconv.ParseInt(arlertCount, 10, 64)
+	}
+
 	addr := os.Getenv("REDIS_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:6379"
@@ -440,13 +445,34 @@ func workers_main() {
 	managerMain(ctx)
 }
 
+func monitor_main() {
+	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt)
+	go func() {
+		<-ch
+		fmt.Println("Gracefully shutting down monitor...")
+		cancel()
+	}()
+
+	monitor(ctx)
+}
+
 func main() {
 	if os.Getenv("QMS_WORKER_ONLY") != "" {
 		workers_main()
 		return
 	}
+	if os.Getenv("QMS_MONITOR_ONLY") != "" {
+		monitor_main()
+		return
+	}
 	if os.Getenv("QMS_API_ONLY") == "" {
 		go workers_main()
+		go monitor_main()
 	}
 
 	app := fiber.New()
