@@ -11,11 +11,12 @@ import (
 	"time"
 )
 
+var ALERT_PREFIX string = ""
 var DING_TALK_TOKEN string = "7b62a9fb7782c7caa3541a35fe66f5f028cf9d4da129a83a119c851602b3643e"
-
 var DING_TALK_API string = "https://oapi.dingtalk.com/robot/send?access_token=7b62a9fb7782c7caa3541a35fe66f5f028cf9d4da129a83a119c851602b3643e"
 
 func init() {
+	ALERT_PREFIX = os.Getenv("ALERT_PREFIX")
 	token := os.Getenv("DING_TALK_TOKEN")
 	if token != "" {
 		DING_TALK_TOKEN = token
@@ -23,8 +24,23 @@ func init() {
 	DING_TALK_API = fmt.Sprint("https://oapi.dingtalk.com/robot/send?access_token=", DING_TALK_TOKEN)
 }
 
-func sendAlertMessage(msg string) {
+func formatMinutes(minute int) string {
+	m := minute % 60
+	result := fmt.Sprintf("%d分钟", m)
+	h := minute / 60
+	d := h / 24
+	if d > 0 {
+		result = fmt.Sprintf("%d天%d小时%d分钟", d, h, m)
+	} else if h > 0 {
+		result = fmt.Sprintf("%d小时%d分钟", h, m)
+	}
+	return result
+}
 
+func sendAlertMessage(msg string) {
+	if ALERT_PREFIX != "" {
+		msg = fmt.Sprintf("【%s】%s", ALERT_PREFIX, msg)
+	}
 	values := map[string]interface{}{"msgtype": "text", "text": map[string]string{
 		"content": msg,
 	}}
@@ -100,8 +116,8 @@ func monitor(ctx context.Context) {
 							} else {
 								diff := time.Since(alertingStatus[queue])
 								diffInMinute := int(diff.Minutes())
-								if diffInMinute == 60 || diffInMinute%(24*60) == 0 { // 第一个小时报警一次，之后每天报警一次
-									sendAlertMessage(fmt.Sprintf("MQS 报警触发持续【%s】【%s】活跃消息个数【%d】", queue, diff, activeLen))
+								if diffInMinute == 10 || diffInMinute == 60 || (diffInMinute > 24*60 && diffInMinute%(24*60) == 0) { // 十分钟后，一个小时后各报警一次，之后每天报警一次
+									sendAlertMessage(fmt.Sprintf("MQS 报警触发持续【%s】【%s】活跃消息个数【%d】", formatMinutes(diffInMinute), queue, activeLen))
 								}
 							}
 						}
