@@ -6,11 +6,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 )
 
-const DING_TALK_API string = "https://oapi.dingtalk.com/robot/send?access_token=7b62a9fb7782c7caa3541a35fe66f5f028cf9d4da129a83a119c851602b3643e"
+var DING_TALK_TOKEN string = "7b62a9fb7782c7caa3541a35fe66f5f028cf9d4da129a83a119c851602b3643e"
+
+var DING_TALK_API string = "https://oapi.dingtalk.com/robot/send?access_token=7b62a9fb7782c7caa3541a35fe66f5f028cf9d4da129a83a119c851602b3643e"
+
+func init() {
+	token := os.Getenv("DING_TALK_TOKEN")
+	if token != "" {
+		DING_TALK_TOKEN = token
+	}
+	DING_TALK_API = fmt.Sprint("https://oapi.dingtalk.com/robot/send?access_token=", DING_TALK_TOKEN)
+}
 
 func sendAlertMessage(msg string) {
 
@@ -21,14 +32,14 @@ func sendAlertMessage(msg string) {
 	json_data, err := json.Marshal(values)
 
 	if err != nil {
-		logWrapper(err)
+		logWrapper("ERROR", err)
 	}
 
 	resp, err := http.Post(DING_TALK_API, "application/json",
 		bytes.NewBuffer(json_data))
 
 	if err != nil {
-		logWrapper(err)
+		logWrapper("ERROR", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -37,12 +48,13 @@ func sendAlertMessage(msg string) {
 
 	json.NewDecoder(resp.Body).Decode(&res)
 
-	logWrapper(res)
+	logWrapper("SEND Alert Message Results:", res)
 }
 
 func monitor(ctx context.Context) {
 	logWrapper("START MONITOR")
-	alertingStatus := make(map[string]bool)
+	alertingStatus := make(map[string]time.Time)
+	emptyTime := time.Time{}
 	activeMsgCounts := make(map[string]int64)
 
 	t := time.Tick(time.Minute)
@@ -80,14 +92,22 @@ func monitor(ctx context.Context) {
 					activeMsgCounts[queue] = activeLen
 					if activeLen > alertCount {
 						logWrapper(queue, "Active Message Count", activeLen)
-						if !alertingStatus[queue] && previousActiveLen > alertCount {
-							alertingStatus[queue] = true
-							logWrapper("ALERT TRIGGERED", queue, "Active Message Count", activeLen)
-							sendAlertMessage(fmt.Sprintf("MQS 报警触发【%s】活跃消息个数【%d】", queue, activeLen))
+						if previousActiveLen > alertCount {
+							if alertingStatus[queue] == emptyTime {
+								alertingStatus[queue] = time.Now()
+								logWrapper("ALERT TRIGGERED", queue, "Active Message Count", activeLen)
+								sendAlertMessage(fmt.Sprintf("MQS 报警触发【%s】活跃消息个数【%d】", queue, activeLen))
+							} else {
+								diff := time.Since(alertingStatus[queue])
+								diffInMinute := int(diff.Minutes())
+								if diffInMinute == 60 || diffInMinute%(24*60) == 0 { // 第一个小时报警一次，之后每天报警一次
+									sendAlertMessage(fmt.Sprintf("MQS 报警触发持续【%s】【%s】活跃消息个数【%d】", queue, diff, activeLen))
+								}
+							}
 						}
 					} else {
-						if alertingStatus[queue] && previousActiveLen > alertCount {
-							alertingStatus[queue] = false
+						if alertingStatus[queue] != emptyTime {
+							alertingStatus[queue] = emptyTime
 							logWrapper("ALERT CANCELLED", queue, "Active Message Count", activeLen)
 							sendAlertMessage(fmt.Sprintf("MQS 报警撤销【%s】活跃消息个数【%d】", queue, activeLen))
 						}
