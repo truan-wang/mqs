@@ -92,7 +92,7 @@ func work(ctx context.Context, queueName string) {
 					logWrapper("ERROR", err)
 				}
 				if exist != 0 {
-					logWrapper("ACTIVE MSG", id)
+					logWrapper("ACTIVE MSG", id, queueName)
 					_, err = Rdb.RPush(ctx, activeKey, id).Result()
 					if err != nil {
 						logWrapper("ERROR", err)
@@ -103,7 +103,7 @@ func work(ctx context.Context, queueName string) {
 						}
 					}
 				} else {
-					logWrapper("INVALID MSG", id)
+					logWrapper("INVALID MSG", id, queueName)
 					_, err = Rdb.ZRem(ctx, inactiveKey, id).Result()
 					if err != nil {
 						logWrapper("ERROR", err)

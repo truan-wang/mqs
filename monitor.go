@@ -99,7 +99,7 @@ func monitor(ctx context.Context) {
 
 				if alertCount > 0 {
 					// check active message count is greate than count
-					logWrapper(queue, "Alert Message Setting", alertCount)
+					// logWrapper(queue, "Alert Message Setting", alertCount)
 					activeLen, err := Rdb.LLen(ctx, "active:"+queue).Result()
 					if err != nil {
 						logWrapper("ERROR", err)
@@ -114,18 +114,18 @@ func monitor(ctx context.Context) {
 								logWrapper("ALERT TRIGGERED", queue, "Active Message Count", activeLen)
 								sendAlertMessage(fmt.Sprintf("MQS 报警触发【%s】活跃消息个数【%d】", queue, activeLen))
 							} else {
-								diff := time.Since(alertingStatus[queue])
-								diffInMinute := int(diff.Minutes())
+								diffInMinute := int(time.Since(alertingStatus[queue]).Minutes())
 								if diffInMinute == 10 || diffInMinute == 60 || (diffInMinute > 24*60 && diffInMinute%(24*60) == 0) { // 十分钟后，一个小时后各报警一次，之后每天报警一次
-									sendAlertMessage(fmt.Sprintf("MQS 报警触发持续【%s】【%s】活跃消息个数【%d】", formatMinutes(diffInMinute), queue, activeLen))
+									sendAlertMessage(fmt.Sprintf("MQS 报警持续【%s】【%s】活跃消息个数【%d】", formatMinutes(diffInMinute), queue, activeLen))
 								}
 							}
 						}
 					} else {
 						if alertingStatus[queue] != emptyTime {
+							diffInMinute := int(time.Since(alertingStatus[queue]).Minutes())
 							alertingStatus[queue] = emptyTime
 							logWrapper("ALERT CANCELLED", queue, "Active Message Count", activeLen)
-							sendAlertMessage(fmt.Sprintf("MQS 报警撤销【%s】活跃消息个数【%d】", queue, activeLen))
+							sendAlertMessage(fmt.Sprintf("MQS 报警解除【%s】持续时间【%s】目前活跃消息个数【%d】", queue, formatMinutes(diffInMinute), activeLen))
 						}
 					}
 				}

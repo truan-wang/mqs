@@ -178,14 +178,14 @@ func sendMessage(c *fiber.Ctx) error {
 	msg := c.Body()
 	msgID := uuid.New().String()
 	_, err = Rdb2.Set(c.Context(), msgID, msg, getQueueMaxTTL(c.Context(), name)).Result()
-	logWrapper("CREATE MSG", msgID)
+	logWrapper("CREATE MSG", msgID, name)
 	if err != nil {
 		return err
 	}
 	Rdb.HIncrBy(c.Context(), "info:"+name, "created_messages_count", 1).Result()
 	if delaySeconds == 0 {
 		Rdb.RPush(c.Context(), "active:"+name, msgID)
-		logWrapper("ACTIVE MSG", msgID)
+		logWrapper("ACTIVE MSG", msgID, name)
 	} else {
 		activeAt := time.Now().Add(time.Second * time.Duration(delaySeconds))
 		z := redis.Z{
@@ -193,7 +193,7 @@ func sendMessage(c *fiber.Ctx) error {
 			Member: msgID,
 		}
 		_, err := Rdb.ZAdd(c.Context(), "inactive:"+name, &z).Result()
-		logWrapper("DELAY  MSG", msgID, "IN", delaySeconds, "SECONDS")
+		logWrapper("DELAY  MSG", msgID, "IN", delaySeconds, "SECONDS", name)
 		if err != nil {
 			return err
 		}
@@ -218,7 +218,7 @@ func getMessage(c *fiber.Ctx) error {
 		timeout = time.Since(startAt)
 		if len(msgs) > 1 && msgs[0] == queueName {
 			msgID := msgs[1]
-			logWrapper("GET    MSG", msgID)
+			logWrapper("GET    MSG", msgID, name)
 			msg, err := Rdb2.Get(c.Context(), msgID).Result()
 			// if msg has been deleted, return null
 			if err == nil && msg != "" {
@@ -236,7 +236,7 @@ func getMessage(c *fiber.Ctx) error {
 				Rdb.HIncrBy(c.Context(), "info:"+name, "get_messages_count", 1).Result()
 				break
 			} else {
-				logWrapper("INVALID MSG", msgID)
+				logWrapper("INVALID MSG", msgID, name)
 			}
 		}
 	}
@@ -273,7 +273,7 @@ func modifyMessage(c *fiber.Ctx) error {
 		Member: msgID,
 	}
 	Rdb.ZAdd(c.Context(), "inactive:"+name, &z).Result()
-	logWrapper("DELAY  MSG", msgID, "IN", delaySeconds, "SECONDS")
+	logWrapper("DELAY  MSG", msgID, "IN", delaySeconds, "SECONDS", name)
 
 	return nil
 }
@@ -287,7 +287,7 @@ func deleteMessage(c *fiber.Ctx) error {
 	if msgID == "" {
 		return fiber.NewError(400, "message ID required")
 	}
-	logWrapper("DELETE MSG", msgID)
+	logWrapper("DELETE MSG", msgID, name)
 	Rdb.ZRem(c.Context(), "inactive:"+name, msgID).Result()
 	Rdb.HIncrBy(c.Context(), "info:"+name, "consumed_messages_count", 1).Result()
 	count, err := Rdb2.Del(c.Context(), msgID).Result()
@@ -295,7 +295,7 @@ func deleteMessage(c *fiber.Ctx) error {
 		return err
 	}
 	if count > 0 {
-		logWrapper("DELETD MSG", msgID)
+		logWrapper("DELETD MSG", msgID, name)
 		c.Status(200)
 	} else {
 		c.Status(404)
