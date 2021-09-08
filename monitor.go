@@ -25,16 +25,16 @@ func init() {
 }
 
 func formatMinutes(minute int) string {
-	m := minute % 60
-	result := fmt.Sprintf("%d分钟", m)
 	h := minute / 60
+	m := minute % 60
 	d := h / 24
+	h = h % 24
 	if d > 0 {
-		result = fmt.Sprintf("%d天%d小时%d分钟", d, h, m)
+		return fmt.Sprintf("%d天%d小时%d分钟", d, h, m)
 	} else if h > 0 {
-		result = fmt.Sprintf("%d小时%d分钟", h, m)
+		return fmt.Sprintf("%d小时%d分钟", h, m)
 	}
-	return result
+	return fmt.Sprintf("%d分钟", m)
 }
 
 func sendAlertMessage(msg string) {
@@ -115,7 +115,7 @@ func monitor(ctx context.Context) {
 								sendAlertMessage(fmt.Sprintf("MQS 报警触发【%s】活跃消息个数【%d】", queue, activeLen))
 							} else {
 								diffInMinute := int(time.Since(alertingStatus[queue]).Minutes())
-								if diffInMinute == 10 || diffInMinute == 60 || (diffInMinute > 24*60 && diffInMinute%(24*60) == 0) { // 十分钟后，一个小时后各报警一次，之后每天报警一次
+								if diffInMinute == 10 || diffInMinute == 60 || (diffInMinute >= 24*60 && diffInMinute%(24*60) == 0) { // 十分钟后，一个小时后各报警一次，之后每天报警一次
 									sendAlertMessage(fmt.Sprintf("MQS 报警持续【%s】【%s】活跃消息个数【%d】", formatMinutes(diffInMinute), queue, activeLen))
 								}
 							}
