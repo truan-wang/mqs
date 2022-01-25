@@ -12,8 +12,8 @@ import (
 )
 
 var ALERT_PREFIX string = ""
-var DING_TALK_TOKEN string = "7b62a9fb7782c7caa3541a35fe66f5f028cf9d4da129a83a119c851602b3643e"
-var DING_TALK_API string = "https://oapi.dingtalk.com/robot/send?access_token=7b62a9fb7782c7caa3541a35fe66f5f028cf9d4da129a83a119c851602b3643e"
+var DING_TALK_TOKEN string = "REPLACE THIS WITH YOUR TOKEN"
+var DING_TALK_API string = "https://oapi.dingtalk.com/robot/send?access_token=REPLACE THIS WITH YOUR ACCESS TOKEN"
 
 func init() {
 	ALERT_PREFIX = os.Getenv("ALERT_PREFIX")
