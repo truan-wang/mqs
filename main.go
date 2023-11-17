@@ -17,7 +17,9 @@ var Rdb *redis.Client
 var Rdb2 *redis.Client
 var AUTH_TOKEN string = os.Getenv("AUTH_TOKEN")
 var DEFAULT_ALERT_ACTIVE_MSG_IN_MINUTE int64 = 0 // no alert
-var infoCache *Cache = NewCache(time.Minute)
+var ttlCache *Cache = NewCache(time.Minute)
+var delaySecondsCache *Cache = NewCache(time.Minute)
+var maxProcessTimeCache *Cache = NewCache(time.Minute)
 
 const MAX_GET_MESSAGE_TIMEOUT time.Duration = 30 * time.Second
 const DEFAULT_MAX_TTL time.Duration = time.Hour * 24 * 15
@@ -98,7 +100,7 @@ func createQueueMaxTTL(key interface{}) interface{} {
 }
 
 func getQueueMaxTTL(c context.Context, name string) time.Duration {
-	d, err := infoCache.Get(name+":max_ttl", createQueueMaxTTL, time.Minute*10)
+	d, err := ttlCache.Get(name, createQueueMaxTTL, time.Minute*10)
 	if err != nil {
 		logWrapper("ERROR", err)
 		return DEFAULT_MAX_TTL
@@ -123,7 +125,7 @@ func createQueueMaxProcessTime(key interface{}) interface{} {
 }
 
 func getQueueMaxProcessTime(c context.Context, name string) time.Duration {
-	d, err := infoCache.Get(name+":max_process_seconds", createQueueMaxProcessTime, time.Minute*10)
+	d, err := maxProcessTimeCache.Get(name, createQueueMaxProcessTime, time.Minute*10)
 	if err != nil {
 		logWrapper("ERROR", err)
 		return DEFAULT_MAX_PROCESS_SECONDS
@@ -148,7 +150,7 @@ func createQueueDefaultDelaySeconds(key interface{}) interface{} {
 }
 
 func getQueueDefaultDelaySeconds(c context.Context, name string) int {
-	d, err := infoCache.Get(name+":delay_seconds", createQueueDefaultDelaySeconds, time.Minute*10)
+	d, err := delaySecondsCache.Get(name, createQueueDefaultDelaySeconds, time.Minute*10)
 	if err != nil {
 		logWrapper("ERROR", err)
 		return int(DEFAULT_DELAY_SECONDS)
