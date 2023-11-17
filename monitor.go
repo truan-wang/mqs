@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -114,7 +115,7 @@ func monitor(ctx context.Context) {
 								logWrapper("ALERT TRIGGERED", queue, "Active Message Count", activeLen)
 								sendAlertMessage(fmt.Sprintf("MQS 报警触发【%s】活跃消息个数【%d】", queue, activeLen))
 							} else {
-								diffInMinute := int(time.Since(alertingStatus[queue]).Minutes())
+								diffInMinute := int(math.Round(time.Since(alertingStatus[queue]).Minutes()))
 								if diffInMinute == 10 || diffInMinute == 60 || (diffInMinute >= 24*60 && diffInMinute%(24*60) == 0) { // 十分钟后，一个小时后各报警一次，之后每天报警一次
 									sendAlertMessage(fmt.Sprintf("MQS 报警持续【%s】【%s】活跃消息个数【%d】", formatMinutes(diffInMinute), queue, activeLen))
 								}
@@ -122,7 +123,7 @@ func monitor(ctx context.Context) {
 						}
 					} else {
 						if alertingStatus[queue] != emptyTime {
-							diffInMinute := int(time.Since(alertingStatus[queue]).Minutes())
+							diffInMinute := int(math.Round(time.Since(alertingStatus[queue]).Minutes()))
 							alertingStatus[queue] = emptyTime
 							logWrapper("ALERT CANCELLED", queue, "Active Message Count", activeLen)
 							sendAlertMessage(fmt.Sprintf("MQS 报警解除【%s】持续时间【%s】目前活跃消息个数【%d】", queue, formatMinutes(diffInMinute), activeLen))
